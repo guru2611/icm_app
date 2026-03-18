@@ -76,7 +76,15 @@ def deploy_full_icm_schema(project_id, dataset_id):
             bigquery.SchemaField("Quarter_Start_Date", "DATE"),
             bigquery.SchemaField("Quarter_End_Date", "DATE"),
             bigquery.SchemaField("Quarter_Number", "INT64"),
-        ]
+        ],
+        "Worker_Pay_Details": [
+            bigquery.SchemaField("Employee_Number", "INT64", mode="REQUIRED"),
+            bigquery.SchemaField("Payment_Date", "DATE"),
+            bigquery.SchemaField("Comp_Plan_ID", "INT64"),
+            bigquery.SchemaField("Pay_Period_Start_Date", "DATE"),
+            bigquery.SchemaField("Pay_Period_End_Date", "DATE"),
+            bigquery.SchemaField("Amount_Paid", "NUMERIC"),
+        ],
     }
 
     for table_id, schema in tables_to_create.items():
