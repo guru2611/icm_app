@@ -1,0 +1,7 @@
+anthropic==0.85.0
+google-cloud-bigquery==3.34.0
+flask==3.1.1
+python-dotenv==1.2.2
+pydantic==2.11.7
+langgraph==1.1.2
+requests==2.32.4
