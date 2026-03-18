@@ -101,6 +101,30 @@ def deploy_full_icm_schema(project_id, dataset_id):
         ],
     }
 
+    # Partition and clustering config applied when tables are created fresh.
+    # Existing tables: run `python -m db.indexes` to migrate.
+    partition_config = {
+        "Sale_Details": bigquery.TimePartitioning(
+            type_=bigquery.TimePartitioningType.MONTH,
+            field="Sale_Transaction_Date",
+        ),
+        "Worker_Pay_Details": bigquery.TimePartitioning(
+            type_=bigquery.TimePartitioningType.MONTH,
+            field="Pay_Period_Start_Date",
+        ),
+        "Audit_Log": bigquery.TimePartitioning(
+            type_=bigquery.TimePartitioningType.DAY,
+            field="timestamp",
+        ),
+    }
+    cluster_config = {
+        "Sale_Details":       ["Employee_Number", "Location_ID"],
+        "Worker_Pay_Details": ["Employee_Number", "Comp_Plan_ID"],
+        "Audit_Log":          ["actor", "action"],
+        "Worker_History":     ["Employee_Number"],
+        "Plan_assignment":    ["Employee_Number"],
+    }
+
     for table_id, schema in tables_to_create.items():
         table_ref = dataset_ref.table(table_id)
         try:
@@ -108,14 +132,19 @@ def deploy_full_icm_schema(project_id, dataset_id):
             print(f"[-] Table {table_id} already exists.")
         except NotFound:
             table = bigquery.Table(table_ref, schema=schema)
-            
-            # Setting Primary Key metadata (Non-enforced, for Optimizer)
+
+            # Primary key metadata (non-enforced, for optimizer)
             if table_id in ["Worker_Profile", "Location_Details", "Plan_Details", "Sale_Details", "Fiscal_Calendar_Details"]:
                 table.table_constraints = TableConstraints(
                     primary_key=PrimaryKey(columns=[schema[0].name]),
                     foreign_keys=[]
                 )
-            
+
+            if table_id in partition_config:
+                table.time_partitioning = partition_config[table_id]
+            if table_id in cluster_config:
+                table.clustering_fields = cluster_config[table_id]
+
             client.create_table(table)
             print(f"[+] Created table: {table_id}")
 
