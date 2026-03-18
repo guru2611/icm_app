@@ -14,6 +14,7 @@ from flask import Flask, Response, jsonify, render_template_string, request, str
 from agents.intake import parse_query
 from agents.planner import plan_investigation
 from agents.investigation import investigate
+from dispute_predictor import get_dispute_predictions
 
 SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_TOKEN      = os.getenv("SLACK_BOT_TOKEN", "")
@@ -30,6 +31,33 @@ def _sse(data: dict) -> str:
 @app.route("/")
 def index():
     return render_template_string(HTML)
+
+
+@app.route("/employee/<int:employee_number>", methods=["GET"])
+def employee_lookup(employee_number):
+    from tools.icm_tools import get_employee_profile
+    profile = get_employee_profile(employee_number)
+    if profile is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({
+        "name":          f"{profile['First_Name']} {profile['Last_Name']}",
+        "job_code":      profile.get("Job_Code"),
+        "location_name": profile.get("Location_Name"),
+        "store_name":    profile.get("Store_Name"),
+        "district":      profile.get("District"),
+        "market":        profile.get("Market"),
+        "territory":     profile.get("Territory"),
+        "supervisor":    profile.get("Supervisor_Name"),
+    })
+
+
+@app.route("/dispute-predictor", methods=["GET"])
+def dispute_predictor_route():
+    try:
+        result = get_dispute_predictions()
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/investigate", methods=["POST"])
