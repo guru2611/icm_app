@@ -70,6 +70,57 @@ def log_event(
     threading.Thread(target=_write, args=(row,), daemon=True).start()
 
 
+def get_audit_log(date_str: str) -> dict:
+    """
+    Return all audit events for a given date (YYYY-MM-DD) plus summary stats.
+    """
+    rows = _client.query(
+        f"""
+        SELECT
+            log_id, timestamp, actor, source, action, endpoint,
+            target_employee_number, query_text, result_status,
+            error_message, ip_address, duration_ms
+        FROM `{PROJECT}.{DATASET}.{TABLE}`
+        WHERE DATE(timestamp) = @dt
+        ORDER BY timestamp DESC
+        """,
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("dt", "DATE", date_str)]
+        ),
+    ).result()
+
+    events = []
+    for row in rows:
+        r = dict(row)
+        if r.get("timestamp"):
+            r["timestamp"] = r["timestamp"].isoformat()
+        events.append(r)
+
+    total      = len(events)
+    errors     = sum(1 for e in events if e["result_status"] == "error")
+    invests    = sum(1 for e in events if e["action"] in ("investigate", "slack_investigate"))
+    actors     = len({e["actor"] for e in events})
+
+    action_counts = {}
+    for e in events:
+        action_counts[e["action"]] = action_counts.get(e["action"], 0) + 1
+    by_action = sorted(
+        [{"action": k, "count": v} for k, v in action_counts.items()],
+        key=lambda x: x["count"], reverse=True,
+    )
+
+    return {
+        "events": events,
+        "summary": {
+            "total_events":   total,
+            "unique_actors":  actors,
+            "investigations": invests,
+            "errors":         errors,
+            "by_action":      by_action,
+        },
+    }
+
+
 def _write(row: dict) -> None:
     try:
         job_config = bigquery.LoadJobConfig(

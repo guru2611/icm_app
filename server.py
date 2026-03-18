@@ -15,7 +15,7 @@ from agents.intake import parse_query
 from agents.planner import plan_investigation
 from agents.investigation import investigate
 from dispute_predictor import get_dispute_predictions
-from db.audit import log_event
+from db.audit import log_event, get_audit_log
 
 SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_TOKEN      = os.getenv("SLACK_BOT_TOKEN", "")
@@ -90,6 +90,19 @@ def employee_lookup(employee_number):
         "territory":     profile.get("Territory"),
         "supervisor":    profile.get("Supervisor_Name"),
     })
+
+
+@app.route("/audit-log", methods=["GET"])
+def audit_log_route():
+    date_str = request.args.get("date", "")
+    if not date_str:
+        from datetime import date
+        date_str = date.today().isoformat()
+    try:
+        result = get_audit_log(date_str)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/dispute-predictor", methods=["GET"])

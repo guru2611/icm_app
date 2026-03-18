@@ -21,6 +21,10 @@ export default defineConfig({
         target: 'http://localhost:5000',
         changeOrigin: true,
       },
+      '/audit-log': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
     },
   },
 })

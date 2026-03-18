@@ -3,6 +3,7 @@ import Header from './components/Header.jsx'
 import InputForm from './components/InputForm.jsx'
 import Pipeline from './components/Pipeline.jsx'
 import DisputePredictorPage from './components/DisputePredictorPage.jsx'
+import AuditPage from './components/AuditPage.jsx'
 
 const initialPipeline = {
   visible: false,
@@ -14,6 +15,7 @@ const initialPipeline = {
 const TABS = [
   { id: 'pipeline',         label: 'The Ops Room'     },
   { id: 'dispute-predictor', label: 'Predictive Pulse' },
+  { id: 'audit',            label: 'Audit Log'         },
 ]
 
 export default function App() {
@@ -192,6 +194,10 @@ export default function App() {
 
         <div className={activeTab === 'dispute-predictor' ? '' : 'hidden'}>
           <DisputePredictorPage />
+        </div>
+
+        <div className={activeTab === 'audit' ? '' : 'hidden'}>
+          <AuditPage />
         </div>
       </main>
     </div>
