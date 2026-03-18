@@ -9,17 +9,48 @@ import threading
 import time
 
 import requests
-from flask import Flask, Response, jsonify, render_template_string, request, stream_with_context
+from flask import Flask, Response, g, jsonify, render_template_string, request, stream_with_context
 
 from agents.intake import parse_query
 from agents.planner import plan_investigation
 from agents.investigation import investigate
 from dispute_predictor import get_dispute_predictions
+from db.audit import log_event
 
 SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_TOKEN      = os.getenv("SLACK_BOT_TOKEN", "")
 
 app = Flask(__name__)
+
+
+# ── SOX Audit Hooks ────────────────────────────────────────────────────────────
+
+@app.before_request
+def _audit_before():
+    g.audit_start = time.time()
+    g.actor       = request.headers.get("X-Actor", "anonymous")
+    g.ip          = request.remote_addr or ""
+
+
+@app.after_request
+def _audit_after(response):
+    # Skip the root HTML page — no compensation data is accessed.
+    if request.path == "/":
+        return response
+    # Skip the /investigate route — it logs its own detailed event inside generate().
+    if request.path == "/investigate":
+        return response
+    duration_ms = int((time.time() - getattr(g, "audit_start", time.time())) * 1000)
+    log_event(
+        actor          = getattr(g, "actor", "anonymous"),
+        action         = request.endpoint or request.path.lstrip("/"),
+        source         = "slack" if request.path == "/slack" else "web",
+        endpoint       = request.path,
+        result_status  = "success" if response.status_code < 400 else "error",
+        ip_address     = getattr(g, "ip", ""),
+        duration_ms    = duration_ms,
+    )
+    return response
 
 
 def _sse(data: dict) -> str:
@@ -38,7 +69,17 @@ def employee_lookup(employee_number):
     from tools.icm_tools import get_employee_profile
     profile = get_employee_profile(employee_number)
     if profile is None:
+        log_event(
+            actor=g.actor, action="employee_lookup", endpoint=request.path,
+            target_employee_number=employee_number, result_status="error",
+            error_message="not found", ip_address=g.ip,
+        )
         return jsonify({"error": "not found"}), 404
+    log_event(
+        actor=g.actor, action="employee_lookup", endpoint=request.path,
+        target_employee_number=employee_number, result_status="success",
+        ip_address=g.ip,
+    )
     return jsonify({
         "name":          f"{profile['First_Name']} {profile['Last_Name']}",
         "job_code":      profile.get("Job_Code"),
@@ -70,6 +111,9 @@ def investigate_route():
         return jsonify({"error": "employee_number and query_text are required."}), 400
 
     def generate():
+        actor = getattr(g, "actor", "anonymous")
+        ip    = getattr(g, "ip", "")
+        start = time.time()
         try:
             intake = parse_query(int(employee_number), query_text)
             yield _sse({"stage": "intake", "result": intake.model_dump()})
@@ -81,7 +125,27 @@ def investigate_route():
             yield _sse({"stage": "investigation", "result": report.model_dump()})
 
             yield _sse({"stage": "done"})
+
+            log_event(
+                actor=actor, action="investigate", source="web",
+                endpoint="/investigate",
+                target_employee_number=int(employee_number),
+                query_text=query_text,
+                result_status="success",
+                ip_address=ip,
+                duration_ms=int((time.time() - start) * 1000),
+            )
         except Exception as exc:
+            log_event(
+                actor=actor, action="investigate", source="web",
+                endpoint="/investigate",
+                target_employee_number=int(employee_number),
+                query_text=query_text,
+                result_status="error",
+                error_message=str(exc),
+                ip_address=ip,
+                duration_ms=int((time.time() - start) * 1000),
+            )
             yield _sse({"stage": "error", "error": str(exc)})
 
     return Response(
@@ -163,16 +227,36 @@ def _format_slack_result(intake, plan, report) -> tuple[list, str]:
     return blocks, f"ICM Investigation: {s['root_cause'][:80]}"
 
 
-def _run_pipeline_and_notify(employee_number: int, query_text: str, response_url: str):
+def _run_pipeline_and_notify(employee_number: int, query_text: str, response_url: str, actor: str, ip: str):
+    start = time.time()
     try:
         intake  = parse_query(employee_number, query_text)
         plan    = plan_investigation(intake)
         report  = investigate(plan)
         blocks, text = _format_slack_result(intake.model_dump(), plan.model_dump(), report.model_dump())
+        log_event(
+            actor=actor, action="slack_investigate", source="slack",
+            endpoint="/slack",
+            target_employee_number=employee_number,
+            query_text=query_text,
+            result_status="success",
+            ip_address=ip,
+            duration_ms=int((time.time() - start) * 1000),
+        )
     except Exception as exc:
         blocks = [{"type": "section", "text": {"type": "mrkdwn",
             "text": f":x: *Pipeline error:* {exc}"}}]
         text = f"ICM Error: {exc}"
+        log_event(
+            actor=actor, action="slack_investigate", source="slack",
+            endpoint="/slack",
+            target_employee_number=employee_number,
+            query_text=query_text,
+            result_status="error",
+            error_message=str(exc),
+            ip_address=ip,
+            duration_ms=int((time.time() - start) * 1000),
+        )
 
     _slack_post(response_url, blocks, text)
 
@@ -195,10 +279,11 @@ def slack_command():
 
     employee_number = int(parts[0])
     query_text      = parts[1]
+    slack_actor     = request.form.get("user_id", "slack:unknown")
 
     threading.Thread(
         target=_run_pipeline_and_notify,
-        args=(employee_number, query_text, response_url),
+        args=(employee_number, query_text, response_url, slack_actor, g.ip),
         daemon=True,
     ).start()
 

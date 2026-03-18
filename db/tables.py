@@ -85,6 +85,20 @@ def deploy_full_icm_schema(project_id, dataset_id):
             bigquery.SchemaField("Pay_Period_End_Date", "DATE"),
             bigquery.SchemaField("Amount_Paid", "NUMERIC"),
         ],
+        "Audit_Log": [
+            bigquery.SchemaField("log_id",                 "STRING",    mode="REQUIRED", description="UUID for this audit event"),
+            bigquery.SchemaField("timestamp",              "TIMESTAMP", mode="REQUIRED", description="UTC timestamp of the event"),
+            bigquery.SchemaField("actor",                  "STRING",    mode="REQUIRED", description="Identity of the requester (X-Actor header)"),
+            bigquery.SchemaField("source",                 "STRING",    description="Request origin: web | slack | api"),
+            bigquery.SchemaField("action",                 "STRING",    description="Logical operation: investigate | employee_lookup | dispute_predictor | slack_investigate"),
+            bigquery.SchemaField("endpoint",               "STRING",    description="HTTP path"),
+            bigquery.SchemaField("target_employee_number", "INT64",     description="Employee whose data was accessed"),
+            bigquery.SchemaField("query_text",             "STRING",    description="Raw compensation query text"),
+            bigquery.SchemaField("result_status",          "STRING",    description="success | error"),
+            bigquery.SchemaField("error_message",          "STRING",    description="Exception message on error"),
+            bigquery.SchemaField("ip_address",             "STRING",    description="Requester IP address"),
+            bigquery.SchemaField("duration_ms",            "INT64",     description="Request duration in milliseconds"),
+        ],
     }
 
     for table_id, schema in tables_to_create.items():
@@ -104,6 +118,32 @@ def deploy_full_icm_schema(project_id, dataset_id):
             
             client.create_table(table)
             print(f"[+] Created table: {table_id}")
+
+def deploy_audit_log_table(project_id, dataset_id):
+    """Create only the Audit_Log table. Safe to run if it already exists."""
+    client    = bigquery.Client(project=project_id)
+    table_ref = bigquery.DatasetReference(project_id, dataset_id).table("Audit_Log")
+    try:
+        client.get_table(table_ref)
+        print("[-] Audit_Log already exists.")
+    except NotFound:
+        schema = [
+            bigquery.SchemaField("log_id",                 "STRING",    mode="REQUIRED"),
+            bigquery.SchemaField("timestamp",              "TIMESTAMP", mode="REQUIRED"),
+            bigquery.SchemaField("actor",                  "STRING",    mode="REQUIRED"),
+            bigquery.SchemaField("source",                 "STRING"),
+            bigquery.SchemaField("action",                 "STRING"),
+            bigquery.SchemaField("endpoint",               "STRING"),
+            bigquery.SchemaField("target_employee_number", "INT64"),
+            bigquery.SchemaField("query_text",             "STRING"),
+            bigquery.SchemaField("result_status",          "STRING"),
+            bigquery.SchemaField("error_message",          "STRING"),
+            bigquery.SchemaField("ip_address",             "STRING"),
+            bigquery.SchemaField("duration_ms",            "INT64"),
+        ]
+        client.create_table(bigquery.Table(table_ref, schema=schema))
+        print("[+] Created table: Audit_Log")
+
 
 if __name__ == "__main__":
     PROJECT = "glossy-buffer-411806"
