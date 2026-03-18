@@ -78,6 +78,7 @@ print(report.summary.root_cause)
 | `GET` | `/employee/<id>` | Employee profile lookup — returns name, job_code, location_name, store_name, district, market, territory, supervisor |
 | `POST` | `/investigate` | SSE stream — runs full 3-stage pipeline, yields `{stage, result}` events |
 | `GET` | `/dispute-predictor` | System-wide payment gap analysis — returns summary stats + disputes list |
+| `GET` | `/audit-log?date=YYYY-MM-DD` | SOX audit log for a given date — returns events + summary stats (defaults to today) |
 | `POST` | `/slack` | Slack slash command handler |
 
 SSE event stages: `intake` → `planner` → `investigation` → `done`
@@ -93,11 +94,12 @@ icm-system/
 ├── tools/
 │   └── icm_tools.py         # All BigQuery-backed tool functions (parameterised queries)
 ├── db/
-│   ├── tables.py            # DDL — creates all BigQuery tables
+│   ├── tables.py            # DDL — creates all BigQuery tables (including Audit_Log)
 │   ├── inserts.py           # Loads Fiscal_Calendar_Details (16 rows)
 │   ├── seed.py              # Populates all tables with sample data
 │   ├── pay_seed.py          # Populates Worker_Pay_Details (biweekly, with intentional gaps)
-│   └── views.py             # Creates 7 analytical views
+│   ├── views.py             # Creates 7 analytical views
+│   └── audit.py             # SOX audit layer — log_event() (fire-and-forget) + get_audit_log(date)
 ├── ui/                      # React + Vite frontend (Tailwind CSS)
 │   └── src/
 │       ├── App.jsx                          # Root — tab nav, SSE handler
@@ -109,6 +111,7 @@ icm-system/
 │           ├── PlannerCard.jsx
 │           ├── InvestigationCard.jsx
 │           ├── DisputePredictorPage.jsx     # Proactive gap dashboard
+│           ├── AuditPage.jsx                # SOX audit log viewer (date picker + events table)
 │           ├── AgentCard.jsx
 │           ├── StatusBadge.jsx
 │           ├── Connector.jsx
@@ -137,6 +140,7 @@ icm-system/
 | `Fiscal_Calendar_Details` | Fiscal year/quarter definitions |
 | `Worker_Pay_Details` | Actual commission payments — amount, period, plan |
 | `Vendor_Program_Details` | Vendor bonus program mappings |
+| `Audit_Log` | Append-only SOX audit trail — every data access and investigation is written here via `db/audit.py` |
 
 ### Views
 
@@ -227,10 +231,11 @@ Returns a dict:
 
 ## UI — Tab Navigation
 
-The React UI (`ui/src/App.jsx`) has two tabs rendered with CSS `hidden` (not conditional rendering) so components stay mounted and data is not re-fetched on tab switch:
+The React UI (`ui/src/App.jsx`) has three tabs rendered with CSS `hidden` (not conditional rendering) so components stay mounted and data is not re-fetched on tab switch:
 
 - **Tab 1: Investigation Pipeline** — employee lookup form + 3-stage SSE pipeline
 - **Tab 2: Dispute Predictor** — loads once on mount, refreshes only on button click
+- **Tab 3: Audit Log** — date-filtered view of `Audit_Log`; loads on mount and on date change
 
 ### InputForm behavior
 - Employee number field is `type="text"` with `inputMode="numeric"` — no browser spinner arrows
@@ -244,6 +249,15 @@ All these paths are proxied from `localhost:5173` → `localhost:5000`:
 - `/slack`
 - `/dispute-predictor`
 - `/employee`
+- `/audit-log`
+
+## SOX Audit Layer (`db/audit.py`)
+
+Every sensitive data access and investigation is logged to `Audit_Log` via `log_event()`, which writes on a daemon thread (fire-and-forget — never blocks the request path). Audit failures are silently printed to stderr; they never crash the app.
+
+Actor identity comes from the `X-Actor` HTTP header. In production this should be set by a trusted auth proxy (Google IAP, JWT middleware, etc.) — it is never trusted from an unauthenticated client. Unauthenticated requests log as `"anonymous"`.
+
+The `/investigate` route logs its own audit event inside the SSE generator (to capture duration). All other routes are logged by the `@app.after_request` hook in `server.py`.
 
 ## Slack Integration
 
