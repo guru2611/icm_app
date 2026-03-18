@@ -1,0 +1,172 @@
+COMPAUDIT
+Intelligent agents. Irrefutable payouts.
+=========================================
+
+
+EXECUTIVE SUMMARY
+-----------------
+CompAudit is an AI-powered Incentive Compensation Management (ICM) platform that automates
+the investigation and resolution of commission disputes. By combining large language models,
+autonomous AI agents, and real-time BigQuery analytics, CompAudit transforms a process that
+historically takes days of manual research into a structured, auditable result delivered in
+seconds.
+
+
+THE PROBLEM
+-----------
+Commission disputes are costly, time-consuming, and opaque.
+
+  - Sales reps spend hours chasing down missing or incorrect payments.
+  - Compensation analysts manually cross-reference sales records, plan documents, fiscal
+    calendars, and payment histories to resolve each case.
+  - Finance teams have no proactive visibility into payment gaps before they become disputes.
+  - The lack of a clear audit trail creates trust issues between sales teams and leadership.
+
+In large organizations with hundreds of reps across multiple comp plans, vendor bonuses, and
+location-based overrides, even a single missed payment period can affect dozens of employees
+simultaneously — often going undetected until reps raise tickets.
+
+
+THE SOLUTION
+------------
+CompAudit is a two-part platform:
+
+  1. THE OPS ROOM — AI Investigation Pipeline
+     An intelligent, three-stage agent pipeline that takes a natural-language query from a
+     sales rep or manager, investigates the underlying compensation data, and returns a
+     clear, structured forensic report.
+
+     Stage 1 — Intake Agent
+     Parses the employee's query using structured AI output. Extracts the employee number,
+     relevant date, and query type (missing commission, incorrect amount, vendor bonus gap,
+     etc.) into a standardized intake record.
+
+     Stage 2 — Planner Agent
+     Uses a LangGraph state machine to generate an ordered investigation plan — a sequence
+     of targeted data lookups tailored to the specific query type. No two plans are the same;
+     the planner reasons about which tools to invoke and in what order.
+
+     Stage 3 — Investigation Agent
+     Executes the plan step by step against live BigQuery data: validating employee records,
+     checking plan enrollments, verifying sales transactions, confirming fiscal period
+     alignment, calculating expected commission, and comparing against actual payments.
+     Synthesizes findings into a forensic summary with a clear root cause and recommendation.
+
+  2. PREDICTIVE PULSE — Proactive Dispute Detection
+     A real-time analytics dashboard that continuously compares estimated commissions against
+     actual payments across all employees, plans, and fiscal quarters. Surfaces payment gaps
+     before reps raise disputes — enabling finance teams to act proactively rather than
+     reactively.
+
+     Metrics surfaced:
+       - Total number of affected employees
+       - Total dollar amount owed vs. paid
+       - Breakdown by job code (Rep, Sr. Rep, Manager, District Manager)
+       - Individual gap records per employee per plan per quarter
+
+
+HOW IT WORKS — TECHNICAL OVERVIEW
+----------------------------------
+CompAudit is built on three layers:
+
+  Data Layer — Google BigQuery
+  All compensation data lives in a structured BigQuery dataset: employee profiles, job
+  histories, location hierarchies, comp plan definitions, plan assignments, sales
+  transactions, fiscal calendar, actual payment records, and vendor bonus programs.
+  Seven analytical views power the investigation tools and the dispute predictor.
+
+  Agent Layer — Python + LangGraph + Claude API
+  The three-stage pipeline is built with Anthropic's Claude models for natural language
+  understanding and structured output, and LangGraph for deterministic state machine
+  orchestration. Each agent step is auditable and reproducible.
+
+  Application Layer — Flask + React
+  A clean, responsive web interface built with React and Tailwind CSS. The investigation
+  pipeline streams results in real time via Server-Sent Events (SSE), so users see each
+  stage complete live. A Slack integration allows reps to submit queries directly from
+  their existing workflow via a slash command.
+
+
+ORG HIERARCHY SUPPORTED
+------------------------
+  District Manager (DM)
+    └── Manager (MGR)
+          ├── Senior Rep (SREP)
+          └── Rep (REP)
+
+CompAudit handles comp plans at both the individual (employee-level) and team
+(location-level) tiers, including manager overrides and district manager plans.
+
+
+COMP PLANS SUPPORTED
+---------------------
+  - Standard Rep Commission       (5–6%,  monthly, employee-level)
+  - Senior Rep Commission         (8–9%,  monthly, employee-level)
+  - Manager Override              (3–4%,  quarterly, location-level)
+  - District Manager Plan         (2%,    quarterly, location-level)
+  - Apple Vendor Bonus            (10–12%, monthly, employee-level)
+  - Samsung Vendor Bonus          (8–9%,  monthly, employee-level)
+  - Google Vendor Bonus           (7–8%,  monthly, employee-level)
+
+
+KEY DIFFERENTIATORS
+--------------------
+  Irrefutable audit trail
+  Every investigation produces a structured forensic report traceable to specific
+  transactions, plan enrollments, and fiscal periods. No black boxes.
+
+  Proactive, not reactive
+  Predictive Pulse identifies payment gaps system-wide before employees raise disputes,
+  reducing escalations and improving trust.
+
+  Natural language interface
+  Reps describe their issue in plain English. No forms, no ticket categories, no manual
+  field mapping. The AI understands the query and builds the investigation.
+
+  Slack-native
+  Reps can submit compensation queries directly from Slack using a slash command —
+  meeting them in the tools they already use.
+
+  Scalable by design
+  Built on BigQuery and stateless APIs. Scales from a single-store pilot to a
+  national deployment without re-architecture.
+
+
+BUSINESS IMPACT
+----------------
+  For Sales Reps          — Faster resolution, transparent explanations, less time chasing
+                            payments and more time selling.
+
+  For Compensation Teams  — Dramatic reduction in manual case work. Proactive gap detection
+                            eliminates surprise escalations.
+
+  For Finance & Legal     — A complete, auditable record of every investigation. Supports
+                            compliance and reduces dispute liability.
+
+  For Leadership          — Real-time visibility into compensation accuracy across the
+                            entire organization.
+
+
+CURRENT STATE
+--------------
+CompAudit is fully operational with:
+  - A working three-stage AI investigation pipeline (Intake → Planner → Investigation)
+  - A live Predictive Pulse dispute detection dashboard
+  - BigQuery-backed data layer with full schema, seed data, and analytical views
+  - React web UI with real-time streaming and employee profile lookup
+  - Slack slash command integration
+  - Deliberate seed data with known payment gaps to demonstrate dispute detection
+
+
+VISION
+-------
+CompAudit is the foundation for a fully autonomous compensation operations platform —
+one where payment gaps are detected and remediated automatically, disputes are resolved
+before they are raised, and every payout is verifiable, defensible, and trusted.
+
+The goal: zero disputed payouts. Not because disputes are suppressed — because they
+never need to happen in the first place.
+
+
+=========================================
+CompAudit — Intelligent agents. Irrefutable payouts.
