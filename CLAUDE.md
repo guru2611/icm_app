@@ -1,45 +1,158 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # ICM System
 
-Incentive Compensation Management system backed by BigQuery, with Python tooling and an AI-powered intake agent.
+Incentive Compensation Management system backed by BigQuery, with Python tooling, an AI-powered investigation pipeline, and a proactive dispute prediction engine.
+
+## Commands
+
+```bash
+# Install (editable mode — required so agents/tools/db are importable as packages)
+pip install -e .
+
+# Run the Flask backend
+python server.py          # http://localhost:5000
+
+# Run the React frontend
+cd ui && npm run dev      # http://localhost:5173
+
+# Run agent CLI demos (standalone testing)
+python -m agents.intake.agent
+python -m agents.planner.agent
+python -m agents.investigation.agent
+
+# First-time BigQuery setup (run once, in order)
+python -c "from db.tables import deploy_full_icm_schema; deploy_full_icm_schema('glossy-buffer-411806', 'icm_analytics')"
+python -c "from db.inserts import load_fiscal_calendar; load_fiscal_calendar('glossy-buffer-411806', 'icm_analytics')"
+python db/seed.py
+python db/pay_seed.py
+python db/views.py
+```
+
+## Architecture
+
+```
+User query (text)
+      │
+      ▼
+┌─────────────────┐
+│  Intake Agent   │  claude.messages.parse() → IntakeResult (structured output)
+│ agents/intake/  │  (employee_number, sale_date, query_type, summary)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Planner Agent   │  LangGraph StateGraph → InvestigationPlan (ordered ToolCall steps)
+│ agents/planner/ │
+└────────┬────────┘
+         │
+         ▼
+┌──────────────────────┐
+│ Investigation Agent  │  LangGraph StateGraph — loops execute_step until done,
+│ agents/investigation/│  then synthesize → InvestigationReport (ForensicSummary)
+└──────────────────────┘
+```
+
+Both the Planner and Investigation agents use **LangGraph** `StateGraph` for flow control. The Intake and Investigation synthesis steps use `client.messages.parse(output_format=PydanticModel)` for structured output — not tool use.
+
+### Python API
+
+```python
+from agents.intake import parse_query
+from agents.planner import plan_investigation
+from agents.investigation import investigate
+
+intake = parse_query(employee_number=145, query_text="I made a sale in November but never got my commission.")
+plan   = plan_investigation(intake)
+report = investigate(plan)
+print(report.summary.root_cause)
+```
+
+### Server routes
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/` | Built-in HTML test page |
+| `GET` | `/employee/<id>` | Employee profile lookup — returns name, job_code, location_name, store_name, district, market, territory, supervisor |
+| `POST` | `/investigate` | SSE stream — runs full 3-stage pipeline, yields `{stage, result}` events |
+| `GET` | `/dispute-predictor` | System-wide payment gap analysis — returns summary stats + disputes list |
+| `POST` | `/slack` | Slack slash command handler |
+
+SSE event stages: `intake` → `planner` → `investigation` → `done`
 
 ## Project Structure
 
 ```
 icm-system/
-├── tables.py          # Creates all BigQuery tables in icm_analytics dataset
-├── inserts.py         # Loads Fiscal_Calendar_Details (16 rows) via load_table_from_json
-├── seed.py            # Populates all tables with realistic sample data
-├── views.py           # Creates analytical views in BigQuery
-├── icm_tools.py       # Agent-callable tool functions (BigQuery-backed)
-├── intake_agent.py    # Claude-powered intake parser (unstructured → structured)
-├── server.py          # Flask backend: serves React UI, investigation pipeline, and Slack slash command
-├── agents/            # Intake, Planner, Investigation agent modules
-├── tools/             # icm_tools.py (BigQuery tool functions)
-├── ui/                # React + Vite frontend (runs on port 5173)
-└── .env               # API keys (do not commit)
+├── agents/
+│   ├── intake/              # Intake agent — text → IntakeResult
+│   ├── planner/             # Planner agent — IntakeResult → InvestigationPlan
+│   └── investigation/       # Investigation agent — plan → InvestigationReport
+├── tools/
+│   └── icm_tools.py         # All BigQuery-backed tool functions (parameterised queries)
+├── db/
+│   ├── tables.py            # DDL — creates all BigQuery tables
+│   ├── inserts.py           # Loads Fiscal_Calendar_Details (16 rows)
+│   ├── seed.py              # Populates all tables with sample data
+│   ├── pay_seed.py          # Populates Worker_Pay_Details (biweekly, with intentional gaps)
+│   └── views.py             # Creates 7 analytical views
+├── ui/                      # React + Vite frontend (Tailwind CSS)
+│   └── src/
+│       ├── App.jsx                          # Root — tab nav, SSE handler
+│       └── components/
+│           ├── Header.jsx
+│           ├── InputForm.jsx                # Employee lookup + query form
+│           ├── Pipeline.jsx
+│           ├── IntakeCard.jsx
+│           ├── PlannerCard.jsx
+│           ├── InvestigationCard.jsx
+│           ├── DisputePredictorPage.jsx     # Proactive gap dashboard
+│           ├── AgentCard.jsx
+│           ├── StatusBadge.jsx
+│           ├── Connector.jsx
+│           └── Skeleton.jsx
+├── dispute_predictor.py     # BigQuery gap analysis: vw_Commission_Estimate vs Worker_Pay_Details
+├── server.py                # Flask backend — all routes + Slack handler
+├── pyproject.toml
+└── .env                     # ANTHROPIC_API_KEY, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN
 ```
 
 ## BigQuery
 
-- **Project:** `glossy-buffer-411806`
-- **Dataset:** `icm_analytics`
-- **Note:** Billing is not enabled on this project. Use `load_table_from_json` (free) instead of SQL INSERT/UPDATE/DELETE (blocked on free tier). DDL (CREATE VIEW, CREATE TABLE) works fine.
+- **Project:** `glossy-buffer-411806` | **Dataset:** `icm_analytics`
+- Billing is not enabled — use `load_table_from_json` for writes (free). DDL and reads work fine. SQL INSERT/UPDATE/DELETE are blocked.
 
-## Tables
+### Tables
 
-| Table | PK | Description |
-|---|---|---|
-| `Worker_Profile` | Employee_Number | 100 employees across 4 job levels |
-| `Worker_History` | — | Job + location assignments per employee (null End_date = active) |
-| `Location_Details` | Location_ID | 20 stores across 3 territories → 6 markets → 12 districts |
-| `Plan_Details` | Comp_Plan_Version_ID | 7 comp plans × 3 fiscal year versions = 21 rows |
-| `Plan_assignment` | — | Maps employees to comp plans per fiscal year |
-| `Vendor_Program_Details` | — | Vendor programs per location with associated comp plans |
-| `Sale_Details` | Transaction_ID | 1000 sales transactions across FY2024–FY2026 |
-| `Fiscal_Calendar_Details` | Fiscal_Calendar_ID | 16 rows — 4 quarters × 4 fiscal years (FY2024–FY2027) |
+| Table | Description |
+|---|---|
+| `Worker_Profile` | Employee registry — number, name, supervisor |
+| `Worker_History` | Job assignments over time — location, job code, start/end dates |
+| `Location_Details` | Store hierarchy — store → district → market → territory |
+| `Plan_Details` | Comp plan versions — rates, period type, applicable level |
+| `Plan_assignment` | Employee plan enrollments with start/end dates |
+| `Sale_Details` | Individual sales transactions |
+| `Fiscal_Calendar_Details` | Fiscal year/quarter definitions |
+| `Worker_Pay_Details` | Actual commission payments — amount, period, plan |
+| `Vendor_Program_Details` | Vendor bonus program mappings |
+
+### Views
+
+| View | Purpose |
+|---|---|
+| `vw_Employee_Roster` | Denormalized profile: name, job, location hierarchy, supervisor |
+| `vw_Active_Plan_Assignments` | Currently active plan enrollments per employee |
+| `vw_Sales_With_Fiscal_Period` | Transactions enriched with fiscal quarter |
+| `vw_Employee_Sales_by_Period` | Sales totals per employee per fiscal quarter |
+| `vw_Location_Sales_by_Period` | Sales totals per location per fiscal quarter |
+| `vw_Commission_Estimate` | Expected commission per employee per plan per quarter — source of truth for dispute detection |
+| `vw_Manager_Team_Summary` | Manager's direct reports with per-rep and team sales |
 
 ### Fiscal Year
 Runs **Feb 1 → Jan 31**. FY2026 = Feb 2025 – Jan 2026.
+Quarters: Q1 Feb–Apr · Q2 May–Jul · Q3 Aug–Oct · Q4 Nov–Jan
 
 ### Org Hierarchy
 ```
@@ -61,148 +174,80 @@ DM (101–105)
 | 6 | Samsung Vendor Bonus | Employee | Monthly | 8→9% |
 | 7 | Google Vendor Bonus | Employee | Monthly | 7→8% |
 
-`Plan_applicable_Level` is either `Employee` (commission on own sales) or `Location` (commission on location's total sales — used for manager overrides).
+`Plan_applicable_Level`: `Employee` = commission on own sales; `Location` = commission on location's total sales (manager overrides).
 
-## Views
+### Intentional Payment Gaps (seed data)
 
-| View | Description |
-|---|---|
-| `vw_Employee_Roster` | Denormalised profile: name, job, location hierarchy, supervisor name |
-| `vw_Active_Plan_Assignments` | Plans active as of today with rates, filtered to `CURRENT_DATE()` |
-| `vw_Sales_With_Fiscal_Period` | Transactions tagged with fiscal year, quarter, employee name, location hierarchy |
-| `vw_Employee_Sales_by_Period` | Sales aggregated per employee per fiscal year + quarter |
-| `vw_Location_Sales_by_Period` | Sales aggregated per location per fiscal year + quarter |
-| `vw_Commission_Estimate` | Estimated commission per employee per quarter — routes to Employee or Location sales based on plan level |
-| `vw_Manager_Team_Summary` | Direct reports' sales + team total per manager per fiscal quarter |
+`db/pay_seed.py` deliberately skips these employees to simulate disputes:
+- **REP:** 145, 158, 172, 183
+- **SREP:** 127, 131
+- **MGR:** 108
+- **DM:** 103
+
+These will always appear in the Dispute Predictor results.
 
 ## Tool Functions (`tools/icm_tools.py`)
 
-All functions return plain dicts/lists and take typed parameters. Parameterised queries throughout — no string interpolation.
+All functions return plain dicts/lists and use parameterised queries.
 
-### Employee
 | Function | Returns |
 |---|---|
 | `is_employee_valid(employee_number)` | `bool` |
-| `get_employee_profile(employee_number)` | `dict \| None` |
-| `get_employee_location_on_date(employee_number, date)` | `dict \| None` — resolves from Worker_History |
-
-### Sales
-| Function | Returns |
-|---|---|
+| `get_employee_profile(employee_number)` | `dict \| None` — from `vw_Employee_Roster` |
+| `get_employee_location_on_date(employee_number, date)` | `dict \| None` |
 | `get_employee_sales_on_date(employee_number, date)` | `list[dict]` |
 | `get_employee_sales_in_period(employee_number, start_date, end_date)` | `list[dict]` |
 | `get_employee_sales_summary(employee_number, fiscal_year, quarter_number)` | `dict \| None` |
-
-### Plan & Eligibility
-| Function | Returns |
-|---|---|
 | `get_employee_plans_on_date(employee_number, date)` | `list[dict]` |
 | `get_sales_qualifying_for_employee_plan(employee_number, date)` | `dict` — `{qualified, sales, qualifying_plans, reason}` |
 | `get_sales_qualifying_for_location_plan(employee_number, date)` | `dict` — `{qualified, sales, location, qualifying_plans, location_day_sales, reason}` |
-
-### Commission
-| Function | Returns |
-|---|---|
 | `get_commission_estimate(employee_number, fiscal_year, quarter_number)` | `list[dict]` |
 | `get_manager_team_summary(manager_employee_number, fiscal_year, quarter_number)` | `list[dict]` |
 
-## Agents (`agents/`)
+## Dispute Predictor (`dispute_predictor.py`)
 
-Three-stage investigation pipeline:
+`get_dispute_predictions()` runs a BigQuery query that:
+1. Aggregates `Worker_Pay_Details` into fiscal quarters (payments are biweekly; must be summed per quarter to compare)
+2. Left-joins against `vw_Commission_Estimate` (expected commission per employee/plan/quarter)
+3. Returns rows where `Estimated_Commission > 0` and `Total_Paid < Estimated_Commission`
 
-| Agent | Module | Description |
-|---|---|---|
-| Intake | `agents/intake` | Parses free-text query → `IntakeResult` (structured) |
-| Planner | `agents/planner` | Routes by query type → ordered list of tool calls (`InvestigationPlan`) |
-| Investigation | `agents/investigation` | Executes tool calls against BigQuery → forensic report |
-
-### IntakeResult schema
+Returns a dict:
 ```python
 {
-  "employee_number": int,
-  "sale_date":       "YYYY-MM-DD" | null,
-  "query_type":      "commission_not_received"
-                   | "incorrect_commission_received"
-                   | "how_much_commission"
-                   | "other",
-  "summary":         str
+  "disputes": [list of individual gap records],
+  "summary": {
+    "affected_employees": int,
+    "total_discrepancy": float,
+    "total_owed": float,
+    "total_paid": float,
+    "by_job_code": [{"job_code", "employees", "plan_gaps", "discrepancy"}]
+  }
 }
 ```
 
-## Server (`server.py`)
+## UI — Tab Navigation
 
-Flask backend on **port 5000**. Serves the React app's API and the Slack slash command.
+The React UI (`ui/src/App.jsx`) has two tabs rendered with CSS `hidden` (not conditional rendering) so components stay mounted and data is not re-fetched on tab switch:
 
-```bash
-cd icm-system && python3 server.py
-```
+- **Tab 1: Investigation Pipeline** — employee lookup form + 3-stage SSE pipeline
+- **Tab 2: Dispute Predictor** — loads once on mount, refreshes only on button click
 
-### Routes
+### InputForm behavior
+- Employee number field is `type="text"` with `inputMode="numeric"` — no browser spinner arrows
+- Debounced lookup (400ms) hits `GET /employee/<id>` and shows a profile card (name, job badge, store, location, district, market, territory, supervisor) on success
+- Query textarea and submit button are disabled until a valid employee is found
+- Submit button is also disabled while the employee lookup is in-flight
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/` | Built-in HTML test page |
-| `POST` | `/investigate` | SSE stream — runs full 3-stage pipeline, yields `{stage, result}` events |
-| `POST` | `/slack` | Slack slash command handler (see below) |
-
-### SSE events (`/investigate`)
-```
-data: {"stage": "intake",        "result": IntakeResult}
-data: {"stage": "planner",       "result": InvestigationPlan}
-data: {"stage": "investigation", "result": ForensicReport}
-data: {"stage": "done"}
-```
-
-## React UI (`ui/`)
-
-Vite + React frontend on **port 5173**. Proxies `/investigate` and `/slack` to Flask on port 5000.
-
-```bash
-cd ui && npm run dev
-```
+### Vite proxy routes (dev only)
+All these paths are proxied from `localhost:5173` → `localhost:5000`:
+- `/investigate`
+- `/slack`
+- `/dispute-predictor`
+- `/employee`
 
 ## Slack Integration
 
-Slash command `/icm` posts an employee number + query to the investigation pipeline and returns a Block Kit formatted forensic report to the channel.
+Slash command format: `/icm <employee_number> <query text>`
 
-### Command format
-```
-/icm <employee_number> <query text>
-/icm 145 I never got my November commission
-```
-
-### How it works
-1. Slack sends `POST /slack` to the server
-2. Server acknowledges immediately (within Slack's 3s window)
-3. Pipeline runs in a background thread
-4. Result is posted back via Slack's `response_url`
-
-### Setup (local dev)
-```bash
-# 1. Start the Flask server
-python3 server.py
-
-# 2. Expose it publicly
-ngrok http 5000
-
-# 3. Set slash command Request URL in Slack app settings:
-#    https://<ngrok-url>/slack
-```
-
-### Required Slack app scopes
-- `chat:write`
-
-## Environment
-
-```bash
-# .env
-ANTHROPIC_API_KEY=...
-SLACK_SIGNING_SECRET=...   # from Slack app Basic Information page
-SLACK_BOT_TOKEN=xoxb-...   # from Slack app OAuth & Permissions page
-```
-
-Install dependencies:
-
-```bash
-pip install anthropic google-cloud-bigquery flask python-dotenv pydantic requests
-```
+Local dev: start Flask → `ngrok http 5000` → set Request URL to `https://<ngrok-url>/slack` in Slack app settings.
+Required scopes: `chat:write`
