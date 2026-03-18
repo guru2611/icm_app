@@ -12,10 +12,10 @@ export default function Header() {
         {/* Text */}
         <div>
           <h1 className="text-white font-semibold text-lg leading-tight tracking-tight">
-            ICM Investigation Pipeline
+            CompAudit
           </h1>
           <p className="text-slate-400 text-xs mt-0.5">
-            AI-powered compensation query investigation
+            Intelligent agents. Irrefutable payouts.
           </p>
         </div>
 

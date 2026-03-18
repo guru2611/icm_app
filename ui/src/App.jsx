@@ -12,8 +12,8 @@ const initialPipeline = {
 }
 
 const TABS = [
-  { id: 'pipeline',         label: 'Investigation Pipeline' },
-  { id: 'dispute-predictor', label: 'Dispute Predictor'     },
+  { id: 'pipeline',         label: 'The Ops Room'     },
+  { id: 'dispute-predictor', label: 'Predictive Pulse' },
 ]
 
 export default function App() {
@@ -21,6 +21,7 @@ export default function App() {
   const [emp, setEmp] = useState('')
   const [query, setQuery] = useState('')
   const [running, setRunning] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState(null)
   const [pipeline, setPipeline] = useState(initialPipeline)
 
@@ -29,11 +30,21 @@ export default function App() {
     if (field === 'query') setQuery(value)
   }
 
+  const handleReset = () => {
+    setEmp('')
+    setQuery('')
+    setError(null)
+    setRunning(false)
+    setSubmitted(false)
+    setPipeline(initialPipeline)
+  }
+
   const runPipeline = async () => {
     if (!emp || !query.trim()) return
 
     setError(null)
     setRunning(true)
+    setSubmitted(true)
     setPipeline({
       ...initialPipeline,
       visible: true,
@@ -153,8 +164,10 @@ export default function App() {
               emp={emp}
               query={query}
               running={running}
+              submitted={submitted}
               onChange={handleChange}
               onSubmit={runPipeline}
+              onReset={handleReset}
             />
 
             {error && (
